@@ -109,5 +109,100 @@
     from { transform: translateX(-100%); }
     to { transform: translateX(200%); }
   }
+
+  /* ===== Weather Alert Animations ===== */
+  .weather-alert-enter {
+    animation: slideDown 0.5s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  }
+  @keyframes slideDown {
+    from { opacity: 0; transform: translateY(-20px); max-height: 0; }
+    to { opacity: 1; transform: translateY(0); max-height: 600px; }
+  }
+
+  .rain-shimmer {
+    position: relative;
+    overflow: hidden;
+  }
+  .rain-shimmer::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      180deg,
+      transparent 0%,
+      hsl(210 80% 60% / 0.06) 40%,
+      hsl(210 80% 60% / 0.12) 60%,
+      transparent 100%
+    );
+    animation: rainShimmer 2.5s ease-in-out infinite;
+    pointer-events: none;
+  }
+  @keyframes rainShimmer {
+    0%, 100% { opacity: 0.3; transform: translateY(-10%); }
+    50% { opacity: 1; transform: translateY(10%); }
+  }
+
+  .rain-drops {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+  }
+  .rain-drop {
+    position: absolute;
+    width: 2px;
+    background: linear-gradient(to bottom, transparent, hsl(210 80% 70% / 0.5));
+    border-radius: 0 0 2px 2px;
+    animation: rainFall linear infinite;
+  }
+  @keyframes rainFall {
+    0% { transform: translateY(-100%); opacity: 0; }
+    10% { opacity: 1; }
+    90% { opacity: 1; }
+    100% { transform: translateY(calc(100% + 40px)); opacity: 0; }
+  }
+
+  .storm-flash {
+    animation: stormFlash 4s ease-in-out infinite;
+  }
+  @keyframes stormFlash {
+    0%, 92%, 96%, 100% { opacity: 0; }
+    93%, 95% { opacity: 0.15; }
+  }
+
+  .post-rain-glow {
+    position: relative;
+    overflow: hidden;
+  }
+  .post-rain-glow::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      135deg,
+      hsl(145 60% 50% / 0.06) 0%,
+      hsl(45 80% 60% / 0.08) 50%,
+      hsl(210 60% 50% / 0.04) 100%
+    );
+    animation: postRainGlow 3s ease-in-out infinite alternate;
+    pointer-events: none;
+  }
+  @keyframes postRainGlow {
+    0% { opacity: 0.5; }
+    100% { opacity: 1; }
+  }
+
+  .rain-locked-overlay {
+    position: relative;
+  }
+  .rain-locked-overlay::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: hsl(210 80% 50% / 0.06);
+    border-radius: inherit;
+    pointer-events: none;
+    z-index: 1;
+  }
 }
 

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Droplets, FlaskRound, Beaker, Power, Pause, CheckCircle2, X, TrendingUp, TrendingDown, Activity } from 'lucide-react';
+import { Droplets, FlaskRound, Beaker, Power, Pause, CheckCircle2, X, TrendingUp, TrendingDown, Activity, CloudRain } from 'lucide-react';
 import { useAgriBot } from '@/contexts/AgriBotContext';
 import { useTranslation } from '@/hooks/useTranslation';
 import { Button } from '@/components/ui/button';
@@ -12,7 +12,7 @@ const PUMP_META = {
 };
 
 export const IrrigationStatus = () => {
-    const { irrigation, startIrrigation, stopIrrigation, activeCrop, activeReading, irrigationStartReadings, lastCycleResult, dismissCycleResult } = useAgriBot();
+    const { irrigation, startIrrigation, stopIrrigation, activeCrop, activeReading, irrigationStartReadings, lastCycleResult, dismissCycleResult, isRainLocked, weatherPhase } = useAgriBot();
     const t = useTranslation();
 
     const statusLabel = irrigation.status === 'Idle' ? t('idle') : irrigation.status === 'Watering' ? t('watering') : t('correctingPH');
@@ -45,7 +45,9 @@ export const IrrigationStatus = () => {
 
     return (
         <div
-            className="rounded-lg border border-border bg-card p-5"
+            className={`rounded-lg border bg-card p-5 transition-all ${
+                isRainLocked ? 'border-[hsl(210,80%,50%,0.3)]' : 'border-border'
+            }`}
             data-testid="irrigation-status-panel"
         >
             <div className="flex items-start justify-between gap-3">
@@ -55,16 +57,40 @@ export const IrrigationStatus = () => {
                     </p>
                     <h3 className="mt-1 font-display text-xl font-semibold">{t('systemControl')}</h3>
                 </div>
-                <span
-                    className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-mono text-[10px] uppercase tracking-widest ${statusCls}`}
-                    data-testid="irrigation-status-pill"
-                >
-                    <span className={`h-1.5 w-1.5 rounded-full ${isActive ? 'bg-current pulse-dot' : 'bg-current opacity-50'}`} />
-                    {statusLabel}
-                </span>
+                {isRainLocked ? (
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-[hsl(210,80%,50%,0.4)] bg-[hsl(210,80%,50%,0.12)] px-2.5 py-1 font-mono text-[10px] uppercase tracking-widest text-[hsl(210,80%,60%)]">
+                        <CloudRain className="h-3 w-3" />
+                        {weatherPhase === 'storm' ? t('stormModeActive') : t('rainModeActive')}
+                    </span>
+                ) : (
+                    <span
+                        className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-mono text-[10px] uppercase tracking-widest ${statusCls}`}
+                        data-testid="irrigation-status-pill"
+                    >
+                        <span className={`h-1.5 w-1.5 rounded-full ${isActive ? 'bg-current pulse-dot' : 'bg-current opacity-50'}`} />
+                        {statusLabel}
+                    </span>
+                )}
             </div>
 
-            <div className="mt-5 grid grid-cols-3 gap-2">
+            {/* Rain lockout banner */}
+            {isRainLocked && (
+                <div className="mt-4 flex items-center gap-3 rounded-lg border border-[hsl(210,80%,50%,0.3)] bg-[hsl(210,80%,50%,0.08)] p-3.5" data-testid="rain-lockout-banner">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[hsl(210,80%,50%,0.15)]">
+                        <CloudRain className="h-5 w-5 text-[hsl(210,80%,60%)]" />
+                    </div>
+                    <div>
+                        <p className="font-display text-sm font-semibold text-[hsl(210,80%,65%)]">
+                            {t('irrigationPausedRain')}
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                            {t('allPumpsLockedRain')}
+                        </p>
+                    </div>
+                </div>
+            )}
+
+            <div className={`mt-5 grid grid-cols-3 gap-2 ${isRainLocked ? 'opacity-40' : ''}`}>
                 {Object.entries(PUMP_META).map(([key, meta]) => {
                     const active = irrigation.pump === key;
                     const Icon = meta.icon;
@@ -93,140 +119,153 @@ export const IrrigationStatus = () => {
                 })}
             </div>
 
-            <div className="mt-5">
-                <div className="mb-1.5 flex items-center justify-between text-xs">
-                    <span className="text-muted-foreground">
-                        {pump ? `${t(pump.labelKey)} ${t('pumpActive')}` : t('noPumpActive')}
-                    </span>
-                    <span className="font-mono text-muted-foreground">
-                        {Math.round(irrigation.progress)}%
-                    </span>
-                </div>
-                <div className="relative">
-                    <Progress value={irrigation.progress} className="h-2" data-testid="irrigation-progress" />
-                    {isActive && (
-                        <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-full">
-                            <div className="flow-bar h-full w-1/2" />
+            {!isRainLocked && (
+                <>
+                    <div className="mt-5">
+                        <div className="mb-1.5 flex items-center justify-between text-xs">
+                            <span className="text-muted-foreground">
+                                {pump ? `${t(pump.labelKey)} ${t('pumpActive')}` : t('noPumpActive')}
+                            </span>
+                            <span className="font-mono text-muted-foreground">
+                                {Math.round(irrigation.progress)}%
+                            </span>
+                        </div>
+                        <div className="relative">
+                            <Progress value={irrigation.progress} className="h-2" data-testid="irrigation-progress" />
+                            {isActive && (
+                                <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-full">
+                                    <div className="flow-bar h-full w-1/2" />
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* ===== LIVE IRRIGATION RESULTS ===== */}
+                    {isActive && irrigationStartReadings && activeReading && (
+                        <div className="mt-5 rounded-md border border-border bg-secondary/30 p-4" data-testid="irrigation-live-results">
+                            <div className="flex items-center gap-2 mb-3">
+                                <Activity className="h-4 w-4 text-primary" />
+                                <p className="font-display text-sm font-semibold">{t('irrigationResults')} — {t('currentCycle')}</p>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-3 text-xs">
+                                <div className="rounded-md border border-border bg-background/60 p-2.5">
+                                    <p className="text-muted-foreground mb-1">{t('pumpType')}</p>
+                                    <p className="font-semibold font-mono">{pump ? t(pump.labelKey) : '—'}</p>
+                                </div>
+                                <div className="rounded-md border border-border bg-background/60 p-2.5">
+                                    <p className="text-muted-foreground mb-1">{t('cycleProgress')}</p>
+                                    <p className="font-semibold font-mono">{Math.round(irrigation.progress)}%</p>
+                                </div>
+
+                                {(irrigation.pump === 'acid' || irrigation.pump === 'base') && (
+                                    <>
+                                        <div className="rounded-md border border-border bg-background/60 p-2.5">
+                                            <p className="text-muted-foreground mb-1">{t('phBefore')}</p>
+                                            <p className="font-semibold font-mono">{irrigationStartReadings.ph?.toFixed(2)}</p>
+                                        </div>
+                                        <div className="rounded-md border border-border bg-background/60 p-2.5">
+                                            <div className="flex items-center gap-1 mb-1">
+                                                <p className="text-muted-foreground">{t('phCurrent')}</p>
+                                                {activeReading.ph < irrigationStartReadings.ph
+                                                    ? <TrendingDown className="h-3 w-3 text-[hsl(var(--ph-acidic))]" />
+                                                    : <TrendingUp className="h-3 w-3 text-[hsl(var(--ph-optimal))]" />
+                                                }
+                                            </div>
+                                            <p className="font-semibold font-mono">{activeReading.ph.toFixed(2)}</p>
+                                        </div>
+                                    </>
+                                )}
+
+                                {irrigation.pump === 'water' && (
+                                    <>
+                                        <div className="rounded-md border border-border bg-background/60 p-2.5">
+                                            <p className="text-muted-foreground mb-1">{t('moistureBefore')}</p>
+                                            <p className="font-semibold font-mono">{irrigationStartReadings.moisture?.toFixed(1)}%</p>
+                                        </div>
+                                        <div className="rounded-md border border-border bg-background/60 p-2.5">
+                                            <div className="flex items-center gap-1 mb-1">
+                                                <p className="text-muted-foreground">{t('moistureCurrent')}</p>
+                                                <TrendingUp className="h-3 w-3 text-[hsl(var(--ph-alkaline))]" />
+                                            </div>
+                                            <p className="font-semibold font-mono">{activeReading.moisture.toFixed(1)}%</p>
+                                        </div>
+                                    </>
+                                )}
+                            </div>
+
+                            <p className="mt-3 text-xs text-muted-foreground">{getActiveMessage()}</p>
+
+                            {idealReached && (
+                                <div className="mt-2 flex items-center gap-2 rounded-md border border-[hsl(var(--ph-optimal)/0.4)] bg-[hsl(var(--ph-optimal)/0.10)] p-2.5 text-xs text-[hsl(var(--ph-optimal))]">
+                                    <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
+                                    <span className="font-medium">{t('idealReached')}</span>
+                                </div>
+                            )}
                         </div>
                     )}
-                </div>
-            </div>
 
-            {/* ===== LIVE IRRIGATION RESULTS ===== */}
-            {isActive && irrigationStartReadings && activeReading && (
-                <div className="mt-5 rounded-md border border-border bg-secondary/30 p-4" data-testid="irrigation-live-results">
-                    <div className="flex items-center gap-2 mb-3">
-                        <Activity className="h-4 w-4 text-primary" />
-                        <p className="font-display text-sm font-semibold">{t('irrigationResults')} — {t('currentCycle')}</p>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3 text-xs">
-                        <div className="rounded-md border border-border bg-background/60 p-2.5">
-                            <p className="text-muted-foreground mb-1">{t('pumpType')}</p>
-                            <p className="font-semibold font-mono">{pump ? t(pump.labelKey) : '—'}</p>
-                        </div>
-                        <div className="rounded-md border border-border bg-background/60 p-2.5">
-                            <p className="text-muted-foreground mb-1">{t('cycleProgress')}</p>
-                            <p className="font-semibold font-mono">{Math.round(irrigation.progress)}%</p>
-                        </div>
-
-                        {(irrigation.pump === 'acid' || irrigation.pump === 'base') && (
-                            <>
-                                <div className="rounded-md border border-border bg-background/60 p-2.5">
-                                    <p className="text-muted-foreground mb-1">{t('phBefore')}</p>
-                                    <p className="font-semibold font-mono">{irrigationStartReadings.ph?.toFixed(2)}</p>
+                    {/* ===== COMPLETED CYCLE RESULT ===== */}
+                    {lastCycleResult && !isActive && (
+                        <div className="mt-5 rounded-md border border-[hsl(var(--ph-optimal)/0.4)] bg-[hsl(var(--ph-optimal)/0.08)] p-4" data-testid="irrigation-cycle-result">
+                            <div className="flex items-center justify-between mb-3">
+                                <div className="flex items-center gap-2">
+                                    <CheckCircle2 className="h-4 w-4 text-[hsl(var(--ph-optimal))]" />
+                                    <p className="font-display text-sm font-semibold text-[hsl(var(--ph-optimal))]">{t('cycleComplete')}</p>
                                 </div>
-                                <div className="rounded-md border border-border bg-background/60 p-2.5">
-                                    <div className="flex items-center gap-1 mb-1">
-                                        <p className="text-muted-foreground">{t('phCurrent')}</p>
-                                        {activeReading.ph < irrigationStartReadings.ph
-                                            ? <TrendingDown className="h-3 w-3 text-[hsl(var(--ph-acidic))]" />
-                                            : <TrendingUp className="h-3 w-3 text-[hsl(var(--ph-optimal))]" />
-                                        }
-                                    </div>
-                                    <p className="font-semibold font-mono">{activeReading.ph.toFixed(2)}</p>
-                                </div>
-                            </>
-                        )}
-
-                        {irrigation.pump === 'water' && (
-                            <>
-                                <div className="rounded-md border border-border bg-background/60 p-2.5">
-                                    <p className="text-muted-foreground mb-1">{t('moistureBefore')}</p>
-                                    <p className="font-semibold font-mono">{irrigationStartReadings.moisture?.toFixed(1)}%</p>
-                                </div>
-                                <div className="rounded-md border border-border bg-background/60 p-2.5">
-                                    <div className="flex items-center gap-1 mb-1">
-                                        <p className="text-muted-foreground">{t('moistureCurrent')}</p>
-                                        <TrendingUp className="h-3 w-3 text-[hsl(var(--ph-alkaline))]" />
-                                    </div>
-                                    <p className="font-semibold font-mono">{activeReading.moisture.toFixed(1)}%</p>
-                                </div>
-                            </>
-                        )}
-                    </div>
-
-                    <p className="mt-3 text-xs text-muted-foreground">{getActiveMessage()}</p>
-
-                    {idealReached && (
-                        <div className="mt-2 flex items-center gap-2 rounded-md border border-[hsl(var(--ph-optimal)/0.4)] bg-[hsl(var(--ph-optimal)/0.10)] p-2.5 text-xs text-[hsl(var(--ph-optimal))]">
-                            <CheckCircle2 className="h-4 w-4 flex-shrink-0" />
-                            <span className="font-medium">{t('idealReached')}</span>
+                                <button
+                                    type="button"
+                                    onClick={dismissCycleResult}
+                                    className="text-muted-foreground hover:text-foreground"
+                                    aria-label="Dismiss"
+                                >
+                                    <X className="h-4 w-4" />
+                                </button>
+                            </div>
+                            <div className="grid grid-cols-2 gap-3 text-xs">
+                                {lastCycleResult.pump === 'water' ? (
+                                    <>
+                                        <div className="rounded-md border border-border bg-background/60 p-2.5">
+                                            <p className="text-muted-foreground mb-1">{t('moistureBefore')}</p>
+                                            <p className="font-semibold font-mono">{lastCycleResult.moisture?.toFixed(1)}%</p>
+                                        </div>
+                                        <div className="rounded-md border border-border bg-background/60 p-2.5">
+                                            <p className="text-muted-foreground mb-1">{t('moistureCurrent')}</p>
+                                            <p className="font-semibold font-mono">{lastCycleResult.endMoisture?.toFixed(1)}%</p>
+                                        </div>
+                                    </>
+                                ) : (
+                                    <>
+                                        <div className="rounded-md border border-border bg-background/60 p-2.5">
+                                            <p className="text-muted-foreground mb-1">{t('phBefore')}</p>
+                                            <p className="font-semibold font-mono">{lastCycleResult.ph?.toFixed(2)}</p>
+                                        </div>
+                                        <div className="rounded-md border border-border bg-background/60 p-2.5">
+                                            <p className="text-muted-foreground mb-1">{t('phCurrent')}</p>
+                                            <p className="font-semibold font-mono">{lastCycleResult.endPh?.toFixed(2)}</p>
+                                        </div>
+                                    </>
+                                )}
+                            </div>
+                            <p className="mt-3 text-xs text-muted-foreground">
+                                {lastCycleResult.pump === 'water' ? t('wateringCompleteMsg') : t('phCorrectionCompleteMsg')}
+                            </p>
                         </div>
                     )}
-                </div>
-            )}
-
-            {/* ===== COMPLETED CYCLE RESULT ===== */}
-            {lastCycleResult && !isActive && (
-                <div className="mt-5 rounded-md border border-[hsl(var(--ph-optimal)/0.4)] bg-[hsl(var(--ph-optimal)/0.08)] p-4" data-testid="irrigation-cycle-result">
-                    <div className="flex items-center justify-between mb-3">
-                        <div className="flex items-center gap-2">
-                            <CheckCircle2 className="h-4 w-4 text-[hsl(var(--ph-optimal))]" />
-                            <p className="font-display text-sm font-semibold text-[hsl(var(--ph-optimal))]">{t('cycleComplete')}</p>
-                        </div>
-                        <button
-                            type="button"
-                            onClick={dismissCycleResult}
-                            className="text-muted-foreground hover:text-foreground"
-                            aria-label="Dismiss"
-                        >
-                            <X className="h-4 w-4" />
-                        </button>
-                    </div>
-                    <div className="grid grid-cols-2 gap-3 text-xs">
-                        {lastCycleResult.pump === 'water' ? (
-                            <>
-                                <div className="rounded-md border border-border bg-background/60 p-2.5">
-                                    <p className="text-muted-foreground mb-1">{t('moistureBefore')}</p>
-                                    <p className="font-semibold font-mono">{lastCycleResult.moisture?.toFixed(1)}%</p>
-                                </div>
-                                <div className="rounded-md border border-border bg-background/60 p-2.5">
-                                    <p className="text-muted-foreground mb-1">{t('moistureCurrent')}</p>
-                                    <p className="font-semibold font-mono">{lastCycleResult.endMoisture?.toFixed(1)}%</p>
-                                </div>
-                            </>
-                        ) : (
-                            <>
-                                <div className="rounded-md border border-border bg-background/60 p-2.5">
-                                    <p className="text-muted-foreground mb-1">{t('phBefore')}</p>
-                                    <p className="font-semibold font-mono">{lastCycleResult.ph?.toFixed(2)}</p>
-                                </div>
-                                <div className="rounded-md border border-border bg-background/60 p-2.5">
-                                    <p className="text-muted-foreground mb-1">{t('phCurrent')}</p>
-                                    <p className="font-semibold font-mono">{lastCycleResult.endPh?.toFixed(2)}</p>
-                                </div>
-                            </>
-                        )}
-                    </div>
-                    <p className="mt-3 text-xs text-muted-foreground">
-                        {lastCycleResult.pump === 'water' ? t('wateringCompleteMsg') : t('phCorrectionCompleteMsg')}
-                    </p>
-                </div>
+                </>
             )}
 
             <div className="mt-5 flex items-center gap-2">
-                {isActive ? (
+                {isRainLocked ? (
+                    <Button
+                        variant="outline"
+                        className="flex-1 opacity-50 cursor-not-allowed border-[hsl(210,80%,50%,0.3)]"
+                        disabled
+                        data-testid="irrigation-rain-locked"
+                    >
+                        <CloudRain className="mr-1.5 h-4 w-4" /> {t('irrigationPausedRain')}
+                    </Button>
+                ) : isActive ? (
                     <Button
                         variant="outline"
                         className="flex-1"

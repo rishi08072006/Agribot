@@ -141,3 +141,24 @@ export const phToneBg = {
     alkaline: 'bg-[hsl(var(--ph-alkaline)/0.12)] border-[hsl(var(--ph-alkaline)/0.4)]',
 };
 
+// Preventive measures during rain/storm — keys match translations
+export const rainPreventiveMeasures = [
+    'preventive1',
+    'preventive2',
+    'preventive3',
+    'preventive4',
+    'preventive5',
+    'preventive6',
+    'preventive7',
+];
+
+// Post-rain recovery insights — keys match translations
+export const postRainInsights = [
+    'postRain1',
+    'postRain2',
+    'postRain3',
+    'postRain4',
+    'postRain5',
+    'postRain6',
+];
+

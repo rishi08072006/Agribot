@@ -19,11 +19,8 @@ export const AgriBotProvider = ({ children }) => {
     const [activeCropId, setActiveCropId] = useState(initialCrops[0].id);
     const [readings, setReadings] = useState(initialReadings);
     const [irrigation, setIrrigation] = useState(initialIrrigation);
-    // Track readings at start of irrigation cycle for results display
     const [irrigationStartReadings, setIrrigationStartReadings] = useState(null);
-    // Track last completed cycle result
     const [lastCycleResult, setLastCycleResult] = useState(null);
-    // Add auto-approval timer to notifications
     const [notifications, setNotifications] = useState(
         initialNotifications.map((n) =>
             n.type !== 'success'
@@ -31,8 +28,8 @@ export const AgriBotProvider = ({ children }) => {
                       ...n,
                       autoApproveAt:
                           Date.now() +
-                          (25 + Math.floor(Math.random() * 10)) * 60 * 1000 + // 25-34 min random
-                          Math.floor(Math.random() * 60) * 1000, // add up to 59s random
+                          (25 + Math.floor(Math.random() * 10)) * 60 * 1000 +
+                          Math.floor(Math.random() * 60) * 1000,
                   }
                 : n
         )
@@ -40,7 +37,15 @@ export const AgriBotProvider = ({ children }) => {
     const [pumps, setPumps] = useState(initialPumps);
     const [health, setHealth] = useState(initialHealth);
     const [online, setOnline] = useState(true);
-    const [weather] = useState(initialWeather);
+    const [weather, setWeather] = useState(initialWeather);
+
+    // ===== WEATHER PHASE STATE MACHINE =====
+    // Phases: 'normal' | 'raining' | 'storm' | 'post-rain'
+    const [weatherPhase, setWeatherPhase] = useState('normal');
+    const weatherTimerRef = useRef(null);
+    const phaseTransitionRef = useRef(null);
+
+    const isRainLocked = weatherPhase === 'raining' || weatherPhase === 'storm';
 
     const tickRef = useRef(0);
 
@@ -72,10 +77,37 @@ export const AgriBotProvider = ({ children }) => {
         return newCrop;
     }, []);
 
+    // Force-stop all irrigation and pumps (used when rain starts)
+    const forceStopAll = useCallback(() => {
+        setIrrigation((prev) => {
+            if (prev.status !== 'Idle') {
+                setReadings((currentReadings) => {
+                    const reading = currentReadings[activeCropId];
+                    if (reading && irrigationStartReadings) {
+                        setLastCycleResult({
+                            ...irrigationStartReadings,
+                            endPh: reading.ph,
+                            endMoisture: reading.moisture,
+                            endTime: Date.now(),
+                            stoppedManually: false,
+                            stoppedByRain: true,
+                        });
+                    }
+                    return currentReadings;
+                });
+            }
+            return { status: 'Idle', pump: null, progress: 0 };
+        });
+        setPumps({ water: false, acid: false, base: false });
+        setIrrigationStartReadings(null);
+    }, [activeCropId, irrigationStartReadings]);
+
     const startIrrigation = useCallback((mode = 'Watering', pump = 'water') => {
+        // Block irrigation during rain/storm
+        if (isRainLocked) return;
+
         setIrrigation({ status: mode, pump, progress: 4 });
         setPumps((p) => ({ ...p, [pump]: true }));
-        // Capture start readings for results display
         setReadings((r) => {
             const activeCropReading = r[activeCropId];
             if (activeCropReading) {
@@ -91,10 +123,9 @@ export const AgriBotProvider = ({ children }) => {
             return r;
         });
         setLastCycleResult(null);
-    }, [activeCropId]);
+    }, [activeCropId, isRainLocked]);
 
     const stopIrrigation = useCallback(() => {
-        // Capture final result before stopping
         setReadings((r) => {
             const activeCropReading = r[activeCropId];
             if (activeCropReading && irrigationStartReadings) {
@@ -118,6 +149,9 @@ export const AgriBotProvider = ({ children }) => {
     }, []);
 
     const togglePump = useCallback((key) => {
+        // Block pump toggle during rain/storm
+        if (isRainLocked) return;
+
         setPumps((p) => {
             const next = { ...p, [key]: !p[key] };
             const anyOn = next.water || next.acid || next.base;
@@ -125,7 +159,6 @@ export const AgriBotProvider = ({ children }) => {
                 const active = next.water ? 'water' : next.acid ? 'acid' : 'base';
                 const status = active === 'water' ? 'Watering' : 'Correcting pH';
                 setIrrigation({ status, pump: active, progress: 8 });
-                // Capture start readings
                 setReadings((r) => {
                     const activeCropReading = r[activeCropId];
                     if (activeCropReading) {
@@ -147,7 +180,7 @@ export const AgriBotProvider = ({ children }) => {
             }
             return next;
         });
-    }, [activeCropId]);
+    }, [activeCropId, isRainLocked]);
 
     const handleNotification = useCallback((id, action) => {
         setNotifications((list) => list.filter((n) => n.id !== id));
@@ -160,12 +193,131 @@ export const AgriBotProvider = ({ children }) => {
 
     const toggleConnectivity = useCallback(() => setOnline((v) => !v), []);
 
-    // Real-time tick — updates sensors, progresses irrigation, handles auto-approval, auto pH correction, and auto-stop on ideal values
+    // ===== WEATHER PHASE CYCLING =====
+    // Simulates: normal → rain → post-rain → normal (repeating)
+    useEffect(() => {
+        const timers = [];
+        const schedule = (fn, delay) => {
+            const id = setTimeout(fn, delay);
+            timers.push(id);
+            return id;
+        };
+
+        // Start the cycle: after 45s, trigger rain
+        schedule(() => {
+            setWeatherPhase('raining');
+            schedule(() => setWeatherPhase('post-rain'), 40_000);
+            schedule(() => {
+                setWeatherPhase('normal');
+                // Second cycle
+                schedule(() => {
+                    setWeatherPhase('raining');
+                    schedule(() => setWeatherPhase('post-rain'), 40_000);
+                    schedule(() => setWeatherPhase('normal'), 90_000);
+                }, 60_000);
+            }, 90_000);
+        }, 45_000);
+
+        return () => timers.forEach((id) => clearTimeout(id));
+    }, []);
+
+    // React to weather phase changes
+    useEffect(() => {
+        if (weatherPhase === 'raining' || weatherPhase === 'storm') {
+            forceStopAll();
+
+            setWeather((w) => ({
+                ...w,
+                condition: weatherPhase === 'storm' ? 'Storm' : 'Raining',
+                rainChance: 95,
+                temp: w.temp - 3,
+                humidity: Math.min(95, w.humidity + 20),
+                wind: weatherPhase === 'storm' ? 35 : w.wind + 5,
+            }));
+
+            setNotifications((n) => {
+                const exists = n.some((notif) => notif.titleKey === 'rainDetected' || notif.titleKey === 'stormDetected');
+                if (!exists) {
+                    return [
+                        {
+                            id: `n-rain-${Date.now()}`,
+                            type: 'warning',
+                            titleKey: weatherPhase === 'storm' ? 'stormDetected' : 'rainDetected',
+                            bodyKey: weatherPhase === 'storm' ? 'stormAlertDesc' : 'rainAlertDesc',
+                            title: weatherPhase === 'storm' ? 'Storm Detected' : 'Rain Detected',
+                            body: weatherPhase === 'storm'
+                                ? 'A storm has been detected. All systems paused.'
+                                : 'Rainfall detected. Irrigation stopped automatically.',
+                            time: Date.now(),
+                        },
+                        ...n,
+                    ].slice(0, 12);
+                }
+                return n;
+            });
+        } else if (weatherPhase === 'post-rain') {
+            setWeather((w) => ({
+                ...w,
+                condition: 'After Rain',
+                rainChance: 15,
+                temp: w.temp + 2,
+                humidity: Math.max(50, w.humidity - 10),
+                wind: Math.max(5, w.wind - 8),
+            }));
+
+            setReadings((prev) => {
+                const next = { ...prev };
+                Object.keys(next).forEach((cid) => {
+                    const r = next[cid];
+                    const newMoist = +clamp(r.moisture + 15 + Math.random() * 10, 5, 95).toFixed(1);
+                    next[cid] = { ...r, moisture: newMoist };
+                });
+                return next;
+            });
+
+            setNotifications((n) => {
+                const exists = n.some((notif) => notif.titleKey === 'postRainTitle');
+                if (!exists) {
+                    return [
+                        {
+                            id: `n-postrain-${Date.now()}`,
+                            type: 'info',
+                            titleKey: 'postRainTitle',
+                            bodyKey: 'postRainDesc',
+                            title: 'Rain Ended — Recovery Insights',
+                            body: 'The rain has stopped. Check fields for waterlogging.',
+                            time: Date.now(),
+                        },
+                        ...n.filter((notif) => notif.titleKey !== 'rainDetected' && notif.titleKey !== 'stormDetected'),
+                    ].slice(0, 12);
+                }
+                return n;
+            });
+        } else if (weatherPhase === 'normal') {
+            setWeather((w) => ({
+                ...w,
+                condition: 'Partly Cloudy',
+                rainChance: 35,
+                temp: initialWeather.temp,
+                humidity: initialWeather.humidity,
+                wind: initialWeather.wind,
+            }));
+
+            setNotifications((n) =>
+                n.filter((notif) =>
+                    notif.titleKey !== 'rainDetected' &&
+                    notif.titleKey !== 'stormDetected' &&
+                    notif.titleKey !== 'postRainTitle'
+                )
+            );
+        }
+    }, [weatherPhase, forceStopAll]);
+
+    // Real-time tick
     useEffect(() => {
         const id = setInterval(() => {
             tickRef.current += 1;
 
-            // Update sensor readings — simulate effect of active pumps on values
             setReadings((prev) => {
                 const next = { ...prev };
                 Object.keys(next).forEach((cid) => {
@@ -174,21 +326,22 @@ export const AgriBotProvider = ({ children }) => {
                     let moistDelta = (Math.random() - 0.5) * 0.8;
                     const tempDelta = (Math.random() - 0.5) * 0.25;
 
-                    // If this is the active crop and irrigation is running, simulate real effects
                     if (cid === activeCropId) {
                         setIrrigation((irr) => {
                             if (irr.status === 'Watering' && irr.pump === 'water') {
-                                // Watering increases moisture
                                 moistDelta += 1.5 + Math.random() * 1.0;
                             } else if (irr.status === 'Correcting pH' && irr.pump === 'acid') {
-                                // Acid lowers pH
                                 phDelta -= 0.08 + Math.random() * 0.04;
                             } else if (irr.status === 'Correcting pH' && irr.pump === 'base') {
-                                // Base raises pH
                                 phDelta += 0.08 + Math.random() * 0.04;
                             }
-                            return irr; // don't actually change irrigation here
+                            return irr;
                         });
+                    }
+
+                    // During rain, moisture increases naturally
+                    if (weatherPhase === 'raining' || weatherPhase === 'storm') {
+                        moistDelta += 0.8 + Math.random() * 0.5;
                     }
 
                     const newPh = +clamp(r.ph + phDelta, 4.5, 8.5).toFixed(2);
@@ -207,6 +360,9 @@ export const AgriBotProvider = ({ children }) => {
                 return next;
             });
 
+            // Skip all irrigation logic during rain lock
+            if (isRainLocked) return;
+
             // Check if ideal values are reached — auto-stop irrigation
             setIrrigation((prev) => {
                 if (prev.status === 'Idle') return prev;
@@ -222,19 +378,12 @@ export const AgriBotProvider = ({ children }) => {
                         let shouldStop = false;
 
                         if (prev.status === 'Watering' && prev.pump === 'water') {
-                            // Stop watering when moisture reaches healthy levels (>= 60%)
-                            if (reading.moisture >= 60) {
-                                shouldStop = true;
-                            }
+                            if (reading.moisture >= 60) shouldStop = true;
                         } else if (prev.status === 'Correcting pH') {
-                            // Stop pH correction when pH is in optimal range
-                            if (reading.ph >= crop.phMin && reading.ph <= crop.phMax) {
-                                shouldStop = true;
-                            }
+                            if (reading.ph >= crop.phMin && reading.ph <= crop.phMax) shouldStop = true;
                         }
 
                         if (shouldStop) {
-                            // Save cycle result
                             setLastCycleResult({
                                 ...irrigationStartReadings,
                                 endPh: reading.ph,
@@ -276,10 +425,9 @@ export const AgriBotProvider = ({ children }) => {
             // Progress irrigation if active
             setIrrigation((prev) => {
                 if (prev.status === 'Idle') return prev;
-                const inc = 2 + Math.random() * 2; // Slower progress to allow ideal-value stopping
+                const inc = 2 + Math.random() * 2;
                 const next = clamp(prev.progress + inc, 0, 100);
                 if (next >= 100) {
-                    // Save cycle result on natural completion
                     setReadings((currentReadings) => {
                         const reading = currentReadings[activeCropId];
                         if (reading) {
@@ -326,23 +474,20 @@ export const AgriBotProvider = ({ children }) => {
                     if (n.type === 'success' || !n.autoApproveAt) return true;
                     if (now >= n.autoApproveAt) {
                         changed = true;
-                        // Auto-approve: trigger irrigation if not already
                         if (typeof startIrrigation === 'function') startIrrigation('Watering', 'water');
-                        return false; // Remove notification
+                        return false;
                     }
                     return true;
                 });
                 return changed ? next : prev;
             });
 
-            // Auto pH correction: acid for high pH, base for low pH
+            // Auto pH correction
             setCrops((prevCrops) => {
                 setReadings((prevReadings) => {
                     setIrrigation((prevIrrigation) => {
-                        // Only auto-correct if no irrigation active
                         if (prevIrrigation.status !== 'Idle') return prevIrrigation;
 
-                        // Find active crop and check pH
                         const activeCrop = prevCrops.find((c) => c.id === activeCropId);
                         if (!activeCrop || !prevReadings[activeCropId]) return prevIrrigation;
 
@@ -350,34 +495,19 @@ export const AgriBotProvider = ({ children }) => {
                         const moistureReading = prevReadings[activeCropId].moisture;
                         const { phMin, phMax } = activeCrop;
 
-                        // High pH: start acid pump
                         if (phReading > phMax) {
-                            // Capture start readings for results display
                             setIrrigationStartReadings({
-                                ph: phReading,
-                                moisture: moistureReading,
+                                ph: phReading, moisture: moistureReading,
                                 temperature: prevReadings[activeCropId].temperature,
-                                startTime: Date.now(),
-                                mode: 'Correcting pH',
-                                pump: 'acid',
+                                startTime: Date.now(), mode: 'Correcting pH', pump: 'acid',
                             });
                             setLastCycleResult(null);
-
                             setNotifications((n) => {
                                 const exists = n.some((notif) => notif.body && notif.body.includes('pH is high'));
                                 if (!exists) {
-                                    return [
-                                        {
-                                            id: `n-${Date.now()}`,
-                                            type: 'warning',
-                                            titleKey: 'highPhDetected',
-                                            title: 'High pH detected',
-                                            body: `pH is ${phReading} (above ${phMax}). Starting acid correction.`,
-                                            time: Date.now(),
-                                            autoApproveAt: Date.now() + 30 * 60 * 1000,
-                                        },
-                                        ...n,
-                                    ].slice(0, 12);
+                                    return [{ id: `n-${Date.now()}`, type: 'warning', titleKey: 'highPhDetected',
+                                        title: 'High pH detected', body: `pH is ${phReading} (above ${phMax}). Starting acid correction.`,
+                                        time: Date.now(), autoApproveAt: Date.now() + 30 * 60 * 1000 }, ...n].slice(0, 12);
                                 }
                                 return n;
                             });
@@ -385,34 +515,19 @@ export const AgriBotProvider = ({ children }) => {
                             return { status: 'Correcting pH', pump: 'acid', progress: 4 };
                         }
 
-                        // Low pH: start base pump
                         if (phReading < phMin) {
-                            // Capture start readings for results display
                             setIrrigationStartReadings({
-                                ph: phReading,
-                                moisture: moistureReading,
+                                ph: phReading, moisture: moistureReading,
                                 temperature: prevReadings[activeCropId].temperature,
-                                startTime: Date.now(),
-                                mode: 'Correcting pH',
-                                pump: 'base',
+                                startTime: Date.now(), mode: 'Correcting pH', pump: 'base',
                             });
                             setLastCycleResult(null);
-
                             setNotifications((n) => {
                                 const exists = n.some((notif) => notif.body && notif.body.includes('pH is low'));
                                 if (!exists) {
-                                    return [
-                                        {
-                                            id: `n-${Date.now()}`,
-                                            type: 'warning',
-                                            titleKey: 'lowPhDetected',
-                                            title: 'Low pH detected',
-                                            body: `pH is ${phReading} (below ${phMin}). Starting base correction.`,
-                                            time: Date.now(),
-                                            autoApproveAt: Date.now() + 30 * 60 * 1000,
-                                        },
-                                        ...n,
-                                    ].slice(0, 12);
+                                    return [{ id: `n-${Date.now()}`, type: 'warning', titleKey: 'lowPhDetected',
+                                        title: 'Low pH detected', body: `pH is ${phReading} (below ${phMin}). Starting base correction.`,
+                                        time: Date.now(), autoApproveAt: Date.now() + 30 * 60 * 1000 }, ...n].slice(0, 12);
                                 }
                                 return n;
                             });
@@ -420,33 +535,19 @@ export const AgriBotProvider = ({ children }) => {
                             return { status: 'Correcting pH', pump: 'base', progress: 4 };
                         }
 
-                        // Low moisture: start watering
                         if (moistureReading < 30) {
                             setIrrigationStartReadings({
-                                ph: phReading,
-                                moisture: moistureReading,
+                                ph: phReading, moisture: moistureReading,
                                 temperature: prevReadings[activeCropId].temperature,
-                                startTime: Date.now(),
-                                mode: 'Watering',
-                                pump: 'water',
+                                startTime: Date.now(), mode: 'Watering', pump: 'water',
                             });
                             setLastCycleResult(null);
-
                             setNotifications((n) => {
                                 const exists = n.some((notif) => notif.body && notif.body.includes('moisture low'));
                                 if (!exists) {
-                                    return [
-                                        {
-                                            id: `n-${Date.now()}`,
-                                            type: 'warning',
-                                            titleKey: 'irrigationAboutToStart',
-                                            title: 'Low moisture detected',
-                                            body: `Soil moisture is ${moistureReading}% — starting water pump.`,
-                                            time: Date.now(),
-                                            autoApproveAt: Date.now() + 30 * 60 * 1000,
-                                        },
-                                        ...n,
-                                    ].slice(0, 12);
+                                    return [{ id: `n-${Date.now()}`, type: 'warning', titleKey: 'irrigationAboutToStart',
+                                        title: 'Low moisture detected', body: `Soil moisture is ${moistureReading}% — starting water pump.`,
+                                        time: Date.now(), autoApproveAt: Date.now() + 30 * 60 * 1000 }, ...n].slice(0, 12);
                                 }
                                 return n;
                             });
@@ -460,9 +561,9 @@ export const AgriBotProvider = ({ children }) => {
                 });
                 return prevCrops;
             });
-        }, 1000); // 1s tick for countdown
+        }, 1000);
         return () => clearInterval(id);
-    }, [startIrrigation, activeCropId, irrigationStartReadings]);
+    }, [startIrrigation, activeCropId, irrigationStartReadings, isRainLocked, weatherPhase]);
 
     const activeCrop = useMemo(
         () => crops.find((c) => c.id === activeCropId) || crops[0],
@@ -478,7 +579,7 @@ export const AgriBotProvider = ({ children }) => {
         notifications, handleNotification, dismissAllNotifications,
         pumps, togglePump,
         health, setHealth,
-        weather,
+        weather, weatherPhase, isRainLocked,
         online, toggleConnectivity,
     };
 

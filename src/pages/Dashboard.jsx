@@ -8,12 +8,32 @@ import { ManualControl } from '@/components/agribot/ManualControl';
 import { DataHistory } from '@/components/agribot/DataHistory';
 import { SystemHealth } from '@/components/agribot/SystemHealth';
 import { WeatherWidget } from '@/components/agribot/WeatherWidget';
+import { WeatherAlert } from '@/components/agribot/WeatherAlert';
 import { useAgriBot } from '@/contexts/AgriBotContext';
 import { useTranslation } from '@/hooks/useTranslation';
 
 const HeroBanner = () => {
-    const { activeCrop } = useAgriBot();
+    const { activeCrop, weatherPhase, isRainLocked } = useAgriBot();
     const t = useTranslation();
+
+    const badgeText = isRainLocked
+        ? (weatherPhase === 'storm' ? t('stormModeActive') : t('rainModeActive'))
+        : weatherPhase === 'post-rain'
+        ? t('postRainRecovery')
+        : t('autopilotEngaged');
+
+    const badgeColor = isRainLocked
+        ? 'border-[hsl(210,80%,50%,0.4)] bg-[hsl(210,80%,50%,0.1)] text-[hsl(210,80%,60%)]'
+        : weatherPhase === 'post-rain'
+        ? 'border-amber-500/30 bg-amber-500/10 text-amber-500'
+        : 'border-border bg-card text-muted-foreground';
+
+    const dotColor = isRainLocked
+        ? 'bg-[hsl(210,80%,60%)]'
+        : weatherPhase === 'post-rain'
+        ? 'bg-amber-400'
+        : 'bg-[hsl(var(--ph-optimal))]';
+
     return (
         <div className="rise" data-testid="hero-banner">
             <div className="flex flex-wrap items-end justify-between gap-3">
@@ -30,9 +50,9 @@ const HeroBanner = () => {
                         {' '}· {activeCrop.soilType.toLowerCase()} {t('soilSuffix')} · {t('targetPh')} {activeCrop.phMin}–{activeCrop.phMax}.
                     </p>
                 </div>
-                <div className="flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1.5 font-mono text-[11px] text-muted-foreground">
-                    <span className="h-1.5 w-1.5 rounded-full bg-[hsl(var(--ph-optimal))] pulse-dot" />
-                    <span>{t('autopilotEngaged')}</span>
+                <div className={`flex items-center gap-2 rounded-full border px-3 py-1.5 font-mono text-[11px] ${badgeColor}`}>
+                    <span className={`h-1.5 w-1.5 rounded-full pulse-dot ${dotColor}`} />
+                    <span>{badgeText}</span>
                 </div>
             </div>
         </div>
@@ -46,6 +66,7 @@ export default function Dashboard() {
             <Navbar />
             <main className="mx-auto max-w-[1480px] px-4 py-6 md:px-6 md:py-8">
                 <div className="space-y-6">
+                    <WeatherAlert />
                     <HeroBanner />
                     <CropSelector />
                     <MonitoringCards />
